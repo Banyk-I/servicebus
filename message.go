@@ -1,4 +1,4 @@
-package ServiceBus
+package servicebus
 
 type Message interface {
 	GetRoutingKey() string

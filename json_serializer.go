@@ -1,4 +1,4 @@
-package ServiceBus
+package servicebus
 
 import "encoding/json"
 

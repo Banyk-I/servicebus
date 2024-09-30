@@ -1,4 +1,4 @@
-package ServiceBus
+package servicebus
 
 import (
 	"errors"
@@ -123,6 +123,27 @@ func (client *RabbitMQClient) bindQueueToExchange() error {
 	return err
 }
 
+//// Publish - метод для надсилання повідомлень
+//func (c *RabbitMQClient) Publish(routingKey string, message interface{}) error {
+//	body, err := json.Marshal(message)
+//	if err != nil {
+//		return err
+//	}
+//
+//	err = c.Channel.Publish(
+//		c.Exchange,
+//		routingKey, // Використовуємо роутінг кей
+//		false,
+//		false,
+//		amqp.Publishing{
+//			ContentType: "application/json",
+//			Body:        body,
+//		},
+//	)
+//
+//	return err
+//}
+
 func (client *RabbitMQClient) Send(message Message) error {
 	log.Println("Sending message...")
 
@@ -144,7 +165,7 @@ func (client *RabbitMQClient) Send(message Message) error {
 
 	err = client.Channel.Publish(
 		client.Exchange,
-		"",
+		message.GetRoutingKey(),
 		false,
 		false,
 		amqp.Publishing{
