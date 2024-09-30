@@ -15,7 +15,6 @@ type RabbitMQClient struct {
 }
 
 func NewRabbitMQClient(amqpURL, exchange, queue string) (*RabbitMQClient, error) {
-	// Logging the initiation of RabbitMQ connection
 	log.Println("Initializing RabbitMQ connection...")
 
 	conn, err := amqp.Dial(amqpURL)
@@ -26,7 +25,6 @@ func NewRabbitMQClient(amqpURL, exchange, queue string) (*RabbitMQClient, error)
 
 	log.Println("Connection to RabbitMQ established successfully.")
 
-	// Create channel
 	ch, err := conn.Channel()
 	if err != nil {
 		log.Printf("Failed to open a channel: %v\n", err)
@@ -35,7 +33,6 @@ func NewRabbitMQClient(amqpURL, exchange, queue string) (*RabbitMQClient, error)
 	}
 	log.Println("Channel opened successfully.")
 
-	// Initialize the serializer
 	serializer := &JSONSerializer{}
 
 	client := &RabbitMQClient{
@@ -46,21 +43,18 @@ func NewRabbitMQClient(amqpURL, exchange, queue string) (*RabbitMQClient, error)
 		Serializer: serializer,
 	}
 
-	// Create exchange
 	if err := client.createExchange(); err != nil {
 		log.Printf("Failed to create exchange: %v\n", err)
 		client.closeChanelConnection()
 		return nil, err
 	}
 
-	// Create queue
 	if err := client.createQueue(); err != nil {
 		log.Printf("Failed to create queue: %v\n", err)
 		client.closeChanelConnection()
 		return nil, err
 	}
 
-	// Bind queue to exchange
 	if err := client.bindQueueToExchange(); err != nil {
 		log.Printf("Failed to bind queue to exchange: %v\n", err)
 		client.closeChanelConnection()
@@ -165,6 +159,53 @@ func (client *RabbitMQClient) Send(message Message) error {
 	}
 
 	log.Println("Message sent successfully.")
+	return nil
+}
+
+func (client *RabbitMQClient) Consume(handler func(Message)) error {
+	log.Println("Starting to consume messages...")
+
+	if client.Connection == nil {
+		log.Println("Connection does not exist.")
+		return errors.New("connection does not exist")
+	}
+
+	if client.Channel == nil {
+		log.Println("Channel does not exist.")
+		return errors.New("channel does not exist")
+	}
+
+	// Receive messages from the queue
+	messages, err := client.Channel.Consume(
+		client.Queue, // queue name
+		"",           // consumer tag
+		true,         // auto-ack
+		false,        // exclusive
+		false,        // no-local
+		false,        // no-wait
+		nil,          // arguments
+	)
+	if err != nil {
+		log.Printf("Failed to start consuming messages: %v\n", err)
+		return err
+	}
+
+	// Start a goroutine to handle incoming messages
+	go func() {
+		for d := range messages {
+			log.Println("Received a message")
+
+			var msg Message
+			if err := client.Serializer.Unmarshal(d.Body, &msg); err != nil {
+				log.Printf("Failed to deserialize message: %v\n", err)
+				continue
+			}
+
+			handler(msg)
+		}
+	}()
+
+	log.Println("Consumer started successfully.")
 	return nil
 }
 
