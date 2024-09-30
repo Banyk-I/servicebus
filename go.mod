@@ -1,4 +1,4 @@
-module github.com/ib407ov/CryptoTop/servicebus
+module github.com/ib407ov/servicebus
 
 go 1.22.0
 
