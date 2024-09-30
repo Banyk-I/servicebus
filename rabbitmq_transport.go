@@ -2,9 +2,8 @@ package ServiceBus
 
 import (
 	"errors"
-	"fmt"
 	"github.com/streadway/amqp"
-	"time"
+	"log"
 )
 
 type RabbitMQClient struct {
@@ -16,61 +15,73 @@ type RabbitMQClient struct {
 }
 
 func NewRabbitMQClient(amqpURL, exchange, queue string) (*RabbitMQClient, error) {
+	// Logging the initiation of RabbitMQ connection
+	log.Println("Initializing RabbitMQ connection...")
+
 	conn, err := amqp.Dial(amqpURL)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to connect to RabbitMQ: %v", err)
+		log.Printf("Failed to connect to RabbitMQ: %v\n", err)
+		return nil, err
 	}
 
+	log.Println("Connection to RabbitMQ established successfully.")
+
+	// Create channel
 	ch, err := conn.Channel()
 	if err != nil {
+		log.Printf("Failed to open a channel: %v\n", err)
 		conn.Close()
-		return nil, fmt.Errorf("Failed to open a channel: %v", err)
+		return nil, err
 	}
+	log.Println("Channel opened successfully.")
+
+	// Initialize the serializer
+	serializer := &JSONSerializer{}
 
 	client := &RabbitMQClient{
 		Connection: conn,
 		Channel:    ch,
 		Exchange:   exchange,
 		Queue:      queue,
-		Serializer: &JSONSerializer{},
+		Serializer: serializer,
 	}
 
+	// Create exchange
 	if err := client.createExchange(); err != nil {
+		log.Printf("Failed to create exchange: %v\n", err)
 		client.closeChanelConnection()
 		return nil, err
 	}
 
+	// Create queue
 	if err := client.createQueue(); err != nil {
+		log.Printf("Failed to create queue: %v\n", err)
 		client.closeChanelConnection()
 		return nil, err
 	}
 
+	// Bind queue to exchange
 	if err := client.bindQueueToExchange(); err != nil {
+		log.Printf("Failed to bind queue to exchange: %v\n", err)
 		client.closeChanelConnection()
 		return nil, err
 	}
 
-	// Set QoS
-	if err := client.Channel.Qos(1, 0, false); err != nil {
-		return nil, fmt.Errorf("Failed to set QoS: %v", err)
-	}
-
-	// Enable Publisher Confirms
-	if err := client.Channel.Confirm(false); err != nil {
-		return nil, fmt.Errorf("Failed to enable publisher confirms: %v", err)
-	}
-
+	log.Println("RabbitMQ setup completed successfully.")
 	return client, nil
 }
 
 func (client *RabbitMQClient) closeChanelConnection() {
+	log.Println("Closing RabbitMQ channel and connection...")
 	client.Channel.Close()
 	client.Connection.Close()
+	log.Println("RabbitMQ channel and connection closed.")
 }
 
 func (client *RabbitMQClient) createExchange() error {
 	if client.Exchange != "" {
-		return client.Channel.ExchangeDeclare(
+		log.Printf("Creating exchange: %s\n", client.Exchange)
+		err := client.Channel.ExchangeDeclare(
 			client.Exchange,
 			"direct",
 			true,
@@ -78,12 +89,17 @@ func (client *RabbitMQClient) createExchange() error {
 			false,
 			false,
 			nil)
+		if err != nil {
+			log.Printf("Failed to declare exchange: %v\n", err)
+		}
+		return err
 	}
 	return nil
 }
 
 func (client *RabbitMQClient) createQueue() error {
 	if client.Queue != "" {
+		log.Printf("Creating queue: %s\n", client.Queue)
 		_, err := client.Channel.QueueDeclare(
 			client.Queue,
 			true,
@@ -91,39 +107,50 @@ func (client *RabbitMQClient) createQueue() error {
 			false,
 			false,
 			nil)
-
+		if err != nil {
+			log.Printf("Failed to declare queue: %v\n", err)
+		}
 		return err
 	}
 	return nil
 }
 
 func (client *RabbitMQClient) bindQueueToExchange() error {
-	return client.Channel.QueueBind(
+	log.Printf("Binding queue %s to exchange %s\n", client.Queue, client.Exchange)
+	err := client.Channel.QueueBind(
 		client.Queue,
 		"",
 		client.Exchange,
 		false,
 		nil)
+	if err != nil {
+		log.Printf("Failed to bind queue to exchange: %v\n", err)
+	}
+	return err
 }
 
-// Send a message to RabbitMQ
-func (client *RabbitMQClient) Send(routingKey string, message Message) error {
+func (client *RabbitMQClient) Send(message Message) error {
+	log.Println("Sending message...")
+
 	if client.Connection == nil {
-		return errors.New("No RabbitMQ connection")
+		log.Println("Connection does not exist.")
+		return errors.New("connection does not exist")
 	}
 
 	if client.Channel == nil {
-		return errors.New("No RabbitMQ channel")
+		log.Println("Channel does not exist.")
+		return errors.New("channel does not exist")
 	}
 
 	body, err := client.Serializer.Marshal(message)
 	if err != nil {
+		log.Printf("Failed to serialize message: %v\n", err)
 		return err
 	}
 
 	err = client.Channel.Publish(
 		client.Exchange,
-		routingKey, // routing key passed as argument
+		"",
 		false,
 		false,
 		amqp.Publishing{
@@ -133,50 +160,27 @@ func (client *RabbitMQClient) Send(routingKey string, message Message) error {
 	)
 
 	if err != nil {
+		log.Printf("Failed to publish message: %v\n", err)
 		return err
 	}
 
-	// Wait for the confirmation
-	select {
-	case confirm := <-client.Channel.NotifyPublish(make(chan amqp.Confirmation, 1)):
-		if !confirm.Ack {
-			return errors.New("Message was not acknowledged")
-		}
-	case <-time.After(5 * time.Second):
-		return errors.New("No confirmation received after 5 seconds")
-	}
-
+	log.Println("Message sent successfully.")
 	return nil
 }
 
-// Consume messages from RabbitMQ
-func (client *RabbitMQClient) Consume() (<-chan amqp.Delivery, error) {
-	msgs, err := client.Channel.Consume(
-		client.Queue, // queue name
-		"",           // consumer tag
-		false,        // auto-ack
-		false,        // exclusive
-		false,        // no-local
-		false,        // no-wait
-		nil,          // arguments
-	)
-
-	if err != nil {
-		return nil, fmt.Errorf("Failed to register a consumer: %v", err)
-	}
-
-	return msgs, nil
-}
-
-// Close the RabbitMQ connection and channel
 func (client *RabbitMQClient) Close() error {
+	log.Println("Closing RabbitMQ connection...")
+
 	if err := client.Channel.Close(); err != nil {
-		return fmt.Errorf("Failed to close channel: %v", err)
+		log.Printf("Failed to close channel: %v\n", err)
+		return err
 	}
 
 	if err := client.Connection.Close(); err != nil {
-		return fmt.Errorf("Failed to close connection: %v", err)
+		log.Printf("Failed to close connection: %v\n", err)
+		return err
 	}
 
+	log.Println("RabbitMQ connection closed successfully.")
 	return nil
 }
