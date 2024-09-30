@@ -1,6 +1,7 @@
 package servicebus
 
 import (
+	"encoding/json"
 	"errors"
 	"github.com/streadway/amqp"
 	"log"
@@ -123,49 +124,16 @@ func (client *RabbitMQClient) bindQueueToExchange() error {
 	return err
 }
 
-//// Publish - метод для надсилання повідомлень
-//func (c *RabbitMQClient) Publish(routingKey string, message interface{}) error {
-//	body, err := json.Marshal(message)
-//	if err != nil {
-//		return err
-//	}
-//
-//	err = c.Channel.Publish(
-//		c.Exchange,
-//		routingKey, // Використовуємо роутінг кей
-//		false,
-//		false,
-//		amqp.Publishing{
-//			ContentType: "application/json",
-//			Body:        body,
-//		},
-//	)
-//
-//	return err
-//}
-
-func (client *RabbitMQClient) Send(message Message) error {
-	log.Println("Sending message...")
-
-	if client.Connection == nil {
-		log.Println("Connection does not exist.")
-		return errors.New("connection does not exist")
-	}
-
-	if client.Channel == nil {
-		log.Println("Channel does not exist.")
-		return errors.New("channel does not exist")
-	}
-
-	body, err := client.Serializer.Marshal(message)
+// Publish - метод для надсилання повідомлень
+func (c *RabbitMQClient) Publish(routingKey string, message interface{}) error {
+	body, err := json.Marshal(message)
 	if err != nil {
-		log.Printf("Failed to serialize message: %v\n", err)
 		return err
 	}
 
-	err = client.Channel.Publish(
-		client.Exchange,
-		message.GetRoutingKey(),
+	err = c.Channel.Publish(
+		c.Exchange,
+		routingKey, // Використовуємо роутінг кей
 		false,
 		false,
 		amqp.Publishing{
@@ -174,14 +142,47 @@ func (client *RabbitMQClient) Send(message Message) error {
 		},
 	)
 
-	if err != nil {
-		log.Printf("Failed to publish message: %v\n", err)
-		return err
-	}
-
-	log.Println("Message sent successfully.")
-	return nil
+	return err
 }
+
+//func (client *RabbitMQClient) Send(message Message) error {
+//	log.Println("Sending message...")
+//
+//	if client.Connection == nil {
+//		log.Println("Connection does not exist.")
+//		return errors.New("connection does not exist")
+//	}
+//
+//	if client.Channel == nil {
+//		log.Println("Channel does not exist.")
+//		return errors.New("channel does not exist")
+//	}
+//
+//	body, err := client.Serializer.Marshal(message)
+//	if err != nil {
+//		log.Printf("Failed to serialize message: %v\n", err)
+//		return err
+//	}
+//
+//	err = client.Channel.Publish(
+//		client.Exchange,
+//		message.GetRoutingKey(),
+//		false,
+//		false,
+//		amqp.Publishing{
+//			ContentType: "application/json",
+//			Body:        body,
+//		},
+//	)
+//
+//	if err != nil {
+//		log.Printf("Failed to publish message: %v\n", err)
+//		return err
+//	}
+//
+//	log.Println("Message sent successfully.")
+//	return nil
+//}
 
 func (client *RabbitMQClient) Consume(handler func(Message)) error {
 	log.Println("Starting to consume messages...")
